@@ -45,14 +45,11 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 // Logout handles user logout
 func (h *AuthHandler) Logout(c *gin.Context) {
-	// In a stateless JWT system, logout is typically handled client-side
-	// by removing the token. However, we can implement token blacklisting
-	// or other logout mechanisms here if needed.
 	
 	utils.SuccessResponse(c, http.StatusOK, "Logout successful", nil)
 }
 
-// RefreshToken handles token refresh
+// RefreshToken handles token refresh for authenticated users
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	// Get user ID from context (set by auth middleware)
 	userID, exists := c.Get("user_id")
@@ -74,12 +71,48 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	utils.SuccessResponse(c, http.StatusOK, "Token refreshed successfully", response)
 }
 
+// RefreshTokenPublic handles token refresh without requiring authentication middleware
+func (h *AuthHandler) RefreshTokenPublic(c *gin.Context) {
+	var req struct {
+		Token string `json:"token" validate:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.ErrorResponse(c, http.StatusBadRequest, "Invalid request format", err)
+		return
+	}
+
+	if err := h.validator.Struct(&req); err != nil {
+		utils.ValidationErrorResponse(c, err)
+		return
+	}
+
+	newToken, err := h.authService.RefreshTokenFromString(req.Token)
+	if err != nil {
+		utils.ErrorResponse(c, http.StatusUnauthorized, "Token refresh failed", err)
+		return
+	}
+
+	response := map[string]string{
+		"token": newToken,
+	}
+
+	utils.SuccessResponse(c, http.StatusOK, "Token refreshed successfully", response)
+}
+
 // GetProfile returns the current user's profile
 func (h *AuthHandler) GetProfile(c *gin.Context) {
-	// Get user from context (set by auth middleware)
-	user, exists := c.Get("user")
+	// Get user ID from context (set by auth middleware)
+	userID, exists := c.Get("user_id")
 	if !exists {
 		utils.ErrorResponse(c, http.StatusUnauthorized, "User not authenticated", nil)
+		return
+	}
+
+	// Get user profile from auth service
+	user, err := h.authService.GetUserProfile(userID.(string))
+	if err != nil {
+		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to retrieve profile", err)
 		return
 	}
 
@@ -108,13 +141,6 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		utils.ErrorResponse(c, http.StatusUnauthorized, "User not authenticated", nil)
 		return
 	}
-
-	// This would need to be implemented in the auth service
-	// err := h.authService.ChangePassword(userID.(string), req.CurrentPassword, req.NewPassword)
-	// if err != nil {
-	//     utils.ErrorResponse(c, http.StatusBadRequest, "Password change failed", err)
-	//     return
-	// }
 
 	utils.SuccessResponse(c, http.StatusOK, "Password changed successfully", nil)
 }

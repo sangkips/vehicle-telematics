@@ -76,7 +76,7 @@ func (s *VehicleService) CreateVehicle(req *CreateVehicleRequest) (*models.Vehic
 		Name:             req.Name,
 		PlateNumber:      req.PlateNumber,
 		Driver:           req.Driver,
-		FuelLevel:        100.0, // Start with full tank
+		FuelLevel:        100.0,
 		MaxFuelCapacity:  req.MaxFuelCapacity,
 		Location: models.Location{
 			Lat:     40.7128, // Default to NYC coordinates

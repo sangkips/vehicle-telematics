@@ -9,54 +9,6 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-// type VehicleHandler struct {
-//     vehicleService *services.VehicleService
-// }
-
-// func NewVehicleHandler(vehicleService *services.VehicleService) *VehicleHandler {
-//     return &VehicleHandler{
-//         vehicleService: vehicleService,
-//     }
-// }
-
-// func (h *VehicleHandler) GetVehicles(c *gin.Context) {
-//     vehicles, err := h.vehicleService.GetAllVehicles()
-//     if err != nil {
-//         c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-//         return
-//     }
-
-//     c.JSON(http.StatusOK, vehicles)
-// }
-
-// func (h *VehicleHandler) CreateVehicle(c *gin.Context) {
-//     var vehicle models.Vehicle
-//     if err := c.ShouldBindJSON(&vehicle); err != nil {
-//         c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-//         return
-//     }
-
-//     createdVehicle, err := h.vehicleService.CreateVehicle(&vehicle)
-//     if err != nil {
-//         c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-//         return
-//     }
-
-//     c.JSON(http.StatusCreated, createdVehicle)
-// }
-
-// func (h *VehicleHandler) GetVehicleUpdates(c *gin.Context) {
-//     // This endpoint returns real-time vehicle data
-//     vehicles, err := h.vehicleService.GetVehicleUpdates()
-//     if err != nil {
-//         c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-//         return
-//     }
-
-//     c.JSON(http.StatusOK, vehicles)
-// }
-
-
 type VehicleHandler struct {
 	vehicleService *services.VehicleService
 	validator      *validator.Validate

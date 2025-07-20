@@ -24,9 +24,8 @@ func NewAuthService(userRepo *repository.UserRepository) *AuthService {
 }
 
 type LoginRequest struct {
-	// Username 	string `json:"username" validate:"required"`
-	Email 		string `json:"email" validate:"required"`
-	Password 	string `json:"password" validate:"required"`
+	Email    string `json:"email" validate:"required,email"`
+	Password string `json:"password" validate:"required"`
 }
 
 type LoginResponse struct {
@@ -35,7 +34,7 @@ type LoginResponse struct {
 }
 
 func (s *AuthService) Login(req *LoginRequest) (*LoginResponse, error) {
-	// Find user by username
+	// Find user by email
 	user, err := s.userRepo.FindByEmail(req.Email)
 	if err != nil {
 		return nil, errors.New("invalid credentials")
@@ -63,18 +62,18 @@ func (s *AuthService) Login(req *LoginRequest) (*LoginResponse, error) {
 	}
 
 	// Create auth user response
-	// authUser := &models.AuthUser{
-	// 	ID:          user.ID.Hex(),
-	// 	Username:    user.Username,
-	// 	Email:       user.Email,
-	// 	FirstName:   user.FirstName,
-	// 	LastName:    user.LastName,
-	// 	Role:        user.Role,
-	// 	Permissions: user.Permissions,
-	// }
+	authUser := &models.AuthUser{
+		ID:          user.ID.Hex(),
+		Username:    user.Username,
+		Email:       user.Email,
+		FirstName:   user.FirstName,
+		LastName:    user.LastName,
+		Role:        user.Role,
+		Permissions: user.Permissions,
+	}
 
 	return &LoginResponse{
-		// User:  authUser,
+		User:  authUser,
 		Token: token,
 	}, nil
 }
@@ -92,12 +91,45 @@ func (s *AuthService) RefreshToken(userID string) (string, error) {
 	}
 
 	// Generate new token
-	token, err := s.jwtUtil.GenerateToken(user.ID.Hex(), user.Username, user.Role)
+	token, err := s.jwtUtil.GenerateToken(user.ID.Hex(), user.Email, user.Role)
 	if err != nil {
 		return "", errors.New("failed to generate token")
 	}
 
 	return token, nil
+}
+
+func (s *AuthService) RefreshTokenFromString(tokenString string) (string, error) {
+	// Use the JWT util's built-in refresh logic
+	newToken, err := s.jwtUtil.RefreshToken(tokenString)
+	if err != nil {
+		return "", errors.New("failed to refresh token")
+	}
+
+	return newToken, nil
+}
+
+func (s *AuthService) GetUserProfile(userID string) (*models.AuthUser, error) {
+	// Find user by ID
+	user, err := s.userRepo.FindByID(userID)
+	if err != nil {
+		return nil, errors.New("user not found")
+	}
+
+	// Check if user is still active
+	if user.Status != "active" {
+		return nil, errors.New("account is not active")
+	}
+
+	return &models.AuthUser{
+		ID:          user.ID.Hex(),
+		Username:    user.Username,
+		Email:       user.Email,
+		FirstName:   user.FirstName,
+		LastName:    user.LastName,
+		Role:        user.Role,
+		Permissions: user.Permissions,
+	}, nil
 }
 
 func (s *AuthService) ValidateToken(tokenString string) (*models.AuthUser, error) {

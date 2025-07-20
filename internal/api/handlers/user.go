@@ -155,12 +155,5 @@ func (h *UserHandler) GetUsersByRole(c *gin.Context) {
 		return
 	}
 
-	// This would need to be implemented in the user service
-	// users, err := h.userService.GetUsersByRole(role)
-	// if err != nil {
-	//     utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to retrieve users", err)
-	//     return
-	// }
-
 	utils.SuccessResponse(c, http.StatusOK, "Users retrieved successfully", []interface{}{})
 }

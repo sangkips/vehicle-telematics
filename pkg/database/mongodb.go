@@ -24,7 +24,7 @@ func Connect(mongoURI string) (*mongo.Database, error) {
 	clientOptions := options.Client().ApplyURI(mongoURI)
 
 	// Set connection timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	// Connect to MongoDB

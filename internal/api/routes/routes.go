@@ -16,18 +16,21 @@ func SetupRoutes(router *gin.Engine, db *mongo.Database) {
 	userRepo := repository.NewUserRepository(db)
 	vehicleRepo := repository.NewVehicleRepository(db)
 	alertRepo := repository.NewAlertRepository(db)
+	maintenanceRepo := repository.NewMaintenanceRepository(db)
 	
 	// Initialize services
 	authService := services.NewAuthService(userRepo)
 	userService := services.NewUserService(userRepo)
 	vehicleService := services.NewVehicleService(vehicleRepo)
 	alertService := services.NewAlertService(alertRepo)
+	maintenanceService := services.NewMaintenanceService(maintenanceRepo, vehicleRepo)
 	
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authService)
 	userHandler := handlers.NewUserHandler(userService)
 	vehicleHandler := handlers.NewVehicleHandler(vehicleService)
 	alertHandler := handlers.NewAlertHandler(alertService)
+	maintenanceHandler := handlers.NewMaintenanceHandler(maintenanceService)
 	
 	// API routes
 	api := router.Group("/api/v1")
@@ -37,8 +40,17 @@ func SetupRoutes(router *gin.Engine, db *mongo.Database) {
 	{
 		auth.POST("/login", authHandler.Login)
 		auth.POST("/logout", authHandler.Logout)
-		auth.POST("/refresh", authHandler.RefreshToken)
+		auth.POST("/refresh", authHandler.RefreshTokenPublic)
 		auth.POST("/register", userHandler.CreateUser)
+	}
+	
+	// Protected auth routes
+	authProtected := api.Group("/auth")
+	authProtected.Use(middleware.AuthMiddleware())
+	{
+		authProtected.GET("/profile", authHandler.GetProfile)
+		authProtected.POST("/change-password", authHandler.ChangePassword)
+		authProtected.POST("/refresh-secure", authHandler.RefreshToken)
 	}
 	
 	// Protected routes
@@ -72,6 +84,31 @@ func SetupRoutes(router *gin.Engine, db *mongo.Database) {
 			alerts.GET("", alertHandler.GetAlerts)
 			alerts.PATCH("/:id/resolve", alertHandler.ResolveAlert)
 			alerts.DELETE("/:id/dismiss", alertHandler.DismissAlert)
+		}
+		
+		// Maintenance
+		maintenance := protected.Group("/maintenance")
+		{
+			// Maintenance Records
+			maintenance.POST("/records", maintenanceHandler.CreateMaintenanceRecord)
+			maintenance.GET("/records", maintenanceHandler.GetMaintenanceRecords)
+			maintenance.GET("/records/:id", maintenanceHandler.GetMaintenanceRecord)
+			maintenance.PATCH("/records/:id", maintenanceHandler.UpdateMaintenanceRecord)
+			maintenance.DELETE("/records/:id", maintenanceHandler.DeleteMaintenanceRecord)
+			
+			// Maintenance Schedules
+			maintenance.POST("/schedules", maintenanceHandler.CreateSchedule)
+			maintenance.GET("/schedules", maintenanceHandler.GetAllSchedules)
+			maintenance.GET("/schedules/upcoming", maintenanceHandler.GetUpcomingSchedules)
+			maintenance.GET("/schedules/vehicle/:vehicleId", maintenanceHandler.GetSchedulesByVehicle)
+			maintenance.GET("/schedules/:id", maintenanceHandler.GetSchedule)
+			maintenance.PATCH("/schedules/:id", maintenanceHandler.UpdateSchedule)
+			maintenance.DELETE("/schedules/:id", maintenanceHandler.DeleteSchedule)
+			
+			// Service Reminders
+			maintenance.GET("/reminders/vehicle/:vehicleId", maintenanceHandler.GetServiceReminders)
+			maintenance.GET("/reminders/overdue", maintenanceHandler.GetOverdueReminders)
+			maintenance.GET("/reminders/due", maintenanceHandler.GetNextServiceDue)
 		}
 	}
 }
