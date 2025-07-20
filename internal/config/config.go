@@ -35,7 +35,7 @@ func Load() *Config {
 
 	allowedOrigins := os.Getenv("ALLOWED_ORIGINS")
 	if allowedOrigins == "" {
-		allowedOrigins = "http://localhost:3000" // Default for development
+		allowedOrigins = "http://localhost:3000"
 	}
 
 	return &Config{

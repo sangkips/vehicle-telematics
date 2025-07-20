@@ -24,7 +24,7 @@ func NewMaintenanceService(maintenanceRepo *repository.MaintenanceRepository, ve
 // Maintenance Records
 type CreateMaintenanceRequest struct {
 	VehicleID       string    `json:"vehicleId" validate:"required"`
-	Type            string    `json:"type" validate:"required"`
+	Types           []string  `json:"types" validate:"required,min=1"`
 	Description     string    `json:"description" validate:"required"`
 	Cost            float64   `json:"cost" validate:"min=0"`
 	Currency        string    `json:"currency" validate:"required"`
@@ -38,7 +38,7 @@ type CreateMaintenanceRequest struct {
 }
 
 type UpdateMaintenanceRequest struct {
-	Type                string     `json:"type,omitempty"`
+	Types               []string   `json:"types,omitempty"`
 	Description         string     `json:"description,omitempty"`
 	Cost                *float64   `json:"cost,omitempty"`
 	Currency            string     `json:"currency,omitempty"`
@@ -64,8 +64,8 @@ func (s *MaintenanceService) CreateMaintenanceRecord(req *CreateMaintenanceReque
 		return nil, errors.New("invalid vehicle ID")
 	}
 
-	// Determine service interval (use custom or default)
-	serviceInterval := s.getServiceInterval(req.Type, req.ServiceInterval)
+	// Determine service interval (use custom or calculate from types)
+	serviceInterval := s.getServiceIntervalForTypes(req.Types, req.ServiceInterval)
 	
 	// Calculate next service odometer
 	nextServiceOdometer := req.Odometer + serviceInterval
@@ -75,7 +75,7 @@ func (s *MaintenanceService) CreateMaintenanceRecord(req *CreateMaintenanceReque
 
 	record := &models.MaintenanceRecord{
 		VehicleID:           vehicleObjectID,
-		Type:                req.Type,
+		Types:               req.Types,
 		Description:         req.Description,
 		Cost:                req.Cost,
 		Currency:            req.Currency,
@@ -96,7 +96,7 @@ func (s *MaintenanceService) CreateMaintenanceRecord(req *CreateMaintenanceReque
 	}
 
 	// Create service reminder
-	s.createServiceReminder(req.VehicleID, req.Type, nextServiceDate, &nextServiceOdometer, req.Odometer)
+	s.createServiceReminder(req.VehicleID, req.Types, nextServiceDate, &nextServiceOdometer, req.Odometer)
 
 	return record, nil
 }
@@ -126,8 +126,8 @@ func (s *MaintenanceService) UpdateMaintenanceRecord(id string, req *UpdateMaint
 	}
 
 	// Update fields if provided
-	if req.Type != "" {
-		record.Type = req.Type
+	if len(req.Types) > 0 {
+		record.Types = req.Types
 	}
 	if req.Description != "" {
 		record.Description = req.Description
@@ -182,14 +182,14 @@ func (s *MaintenanceService) DeleteMaintenanceRecord(id string) error {
 
 // Maintenance Schedules
 type CreateScheduleRequest struct {
-	VehicleID           string `json:"vehicleId" validate:"required"`
-	Type                string `json:"type" validate:"required"`
-	Description         string `json:"description" validate:"required"`
-	IntervalKm          int    `json:"intervalKm" validate:"required,min=1"`
-	IntervalDays        *int   `json:"intervalDays,omitempty"`
-	LastServiceOdometer int    `json:"lastServiceOdometer" validate:"required,min=0"`
+	VehicleID           string    `json:"vehicleId" validate:"required"`
+	Types               []string  `json:"types" validate:"required,min=1"`
+	Description         string    `json:"description" validate:"required"`
+	IntervalKm          int       `json:"intervalKm" validate:"required,min=1"`
+	IntervalDays        *int      `json:"intervalDays,omitempty"`
+	LastServiceOdometer int       `json:"lastServiceOdometer" validate:"required,min=0"`
 	LastServiceDate     time.Time `json:"lastServiceDate" validate:"required"`
-	ServiceCenterName   string `json:"serviceCenterName" validate:"required"`
+	ServiceCenterName   string    `json:"serviceCenterName" validate:"required"`
 }
 
 type UpdateScheduleRequest struct {
@@ -229,7 +229,7 @@ func (s *MaintenanceService) CreateSchedule(req *CreateScheduleRequest) (*models
 
 	schedule := &models.MaintenanceSchedule{
 		VehicleID:           vehicleObjectID,
-		Type:                req.Type,
+		Types:               req.Types,
 		Description:         req.Description,
 		IntervalKm:          req.IntervalKm,
 		IntervalDays:        req.IntervalDays,
@@ -352,7 +352,7 @@ func (s *MaintenanceService) GetOverdueReminders() ([]*models.ServiceReminder, e
 }
 
 // Helper functions
-func (s *MaintenanceService) createServiceReminder(vehicleID, maintenanceType string, nextServiceDate *time.Time, nextServiceOdometer *int, currentOdometer int) error {
+func (s *MaintenanceService) createServiceReminder(vehicleID string, maintenanceTypes []string, nextServiceDate *time.Time, nextServiceOdometer *int, currentOdometer int) error {
 	vehicleObjectID, err := primitive.ObjectIDFromHex(vehicleID)
 	if err != nil {
 		return err
@@ -360,7 +360,7 @@ func (s *MaintenanceService) createServiceReminder(vehicleID, maintenanceType st
 
 	reminder := &models.ServiceReminder{
 		VehicleID:       vehicleObjectID,
-		Type:            maintenanceType,
+		Types:           maintenanceTypes,
 		DueDate:         nextServiceDate,
 		DueOdometer:     nextServiceOdometer,
 		CurrentOdometer: currentOdometer,
@@ -421,17 +421,35 @@ func (s *MaintenanceService) calculatePriority(dueDate *time.Time, dueOdometer *
 	return models.PriorityLow
 }
 
-// getServiceInterval returns the service interval for a maintenance type
-func (s *MaintenanceService) getServiceInterval(maintenanceType string, customInterval *int) int {
+// getServiceIntervalForTypes returns the service interval for multiple maintenance types
+// Uses the shortest interval among all types to ensure no service is missed
+func (s *MaintenanceService) getServiceIntervalForTypes(maintenanceTypes []string, customInterval *int) int {
 	if customInterval != nil && *customInterval > 0 {
 		return *customInterval
 	}
 
-	if interval, exists := models.DefaultServiceIntervals[maintenanceType]; exists {
-		return interval
+	if len(maintenanceTypes) == 0 {
+		return 10000 // Default interval
 	}
 
-	// Default interval if type not found
+	// Find the shortest interval among all types
+	shortestInterval := 100000 // Start with a large number
+	found := false
+
+	for _, maintenanceType := range maintenanceTypes {
+		if interval, exists := models.DefaultServiceIntervals[maintenanceType]; exists {
+			if interval < shortestInterval {
+				shortestInterval = interval
+				found = true
+			}
+		}
+	}
+
+	if found {
+		return shortestInterval
+	}
+
+	// Default interval if no types found
 	return 10000 // 10,000 km default
 }
 
@@ -512,7 +530,7 @@ func (s *MaintenanceService) GetNextServiceDue(thresholdKm int) ([]*models.Servi
 			// No maintenance history - vehicle might need initial service
 			reminder := &models.ServiceReminder{
 				VehicleID:       vehicle.ID,
-				Type:            "inspection",
+				Types:           []string{"inspection"},
 				CurrentOdometer: vehicle.Odometer,
 				Priority:        models.PriorityMedium,
 				IsOverdue:       false,
@@ -530,7 +548,7 @@ func (s *MaintenanceService) GetNextServiceDue(thresholdKm int) ([]*models.Servi
 			
 			reminder := &models.ServiceReminder{
 				VehicleID:        vehicle.ID,
-				Type:             latestRecord.Type,
+				Types:            latestRecord.Types,
 				DueOdometer:      &latestRecord.NextServiceOdometer,
 				CurrentOdometer:  vehicle.Odometer,
 				OdometerUntilDue: &kmUntilService,

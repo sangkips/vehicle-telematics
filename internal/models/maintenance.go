@@ -9,7 +9,7 @@ import (
 type MaintenanceRecord struct {
 	ID                   primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	VehicleID            primitive.ObjectID `json:"vehicleId" bson:"vehicle_id"`
-	Type                 string             `json:"type" bson:"type"`
+	Types                []string           `json:"types" bson:"types"`
 	Description          string             `json:"description" bson:"description"`
 	Cost                 float64            `json:"cost" bson:"cost"`
 	Currency             string             `json:"currency" bson:"currency"`
@@ -29,7 +29,7 @@ type MaintenanceRecord struct {
 type MaintenanceSchedule struct {
 	ID                   primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	VehicleID            primitive.ObjectID `json:"vehicleId" bson:"vehicle_id"`
-	Type                 string             `json:"type" bson:"type"`
+	Types                []string           `json:"types" bson:"types"`
 	Description          string             `json:"description" bson:"description"`
 	IntervalKm           int                `json:"intervalKm" bson:"interval_km"`           // service every X km (required)
 	IntervalDays         *int               `json:"intervalDays,omitempty" bson:"interval_days,omitempty"` // optional: service every X days
@@ -46,7 +46,7 @@ type MaintenanceSchedule struct {
 type ServiceReminder struct {
 	ID                primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	VehicleID         primitive.ObjectID `json:"vehicleId" bson:"vehicle_id"`
-	Type              string             `json:"type" bson:"type"`
+	Types             []string           `json:"types" bson:"types"`
 	DueDate           *time.Time         `json:"dueDate,omitempty" bson:"due_date,omitempty"`
 	DueOdometer       *int               `json:"dueOdometer,omitempty" bson:"due_odometer,omitempty"`
 	CurrentOdometer   int                `json:"currentOdometer" bson:"current_odometer"`
@@ -102,13 +102,48 @@ const (
 // ServiceIntervalConfig defines default service intervals for different maintenance types
 type ServiceIntervalConfig struct {
 	ID           primitive.ObjectID `json:"id" bson:"_id,omitempty"`
-	Type         string             `json:"type" bson:"type"`
+	Types        []string           `json:"types" bson:"types"`
 	IntervalKm   int                `json:"intervalKm" bson:"interval_km"`
 	IntervalDays int                `json:"intervalDays" bson:"interval_days"`
 	Description  string             `json:"description" bson:"description"`
 	CreatedAt    time.Time          `json:"createdAt" bson:"created_at"`
 	UpdatedAt    time.Time          `json:"updatedAt" bson:"updated_at"`
 }
+
+// Constants for common parts that can be replaced
+const (
+	PartEngineOil        = "engine_oil"
+	PartOilFilter        = "oil_filter"
+	PartAirFilter        = "air_filter"
+	PartFuelFilter       = "fuel_filter"
+	PartSparkPlugs       = "spark_plugs"
+	PartBrakePads        = "brake_pads"
+	PartBrakeDiscs       = "brake_discs"
+	PartBrakeFluid       = "brake_fluid"
+	PartTransmissionOil  = "transmission_oil"
+	PartCoolant          = "coolant"
+	PartBattery          = "battery"
+	PartTires            = "tires"
+	PartTimingBelt       = "timing_belt"
+	PartSerpentineBelt   = "serpentine_belt"
+	PartAlternator       = "alternator"
+	PartStarter          = "starter"
+	PartRadiator         = "radiator"
+	PartThermostat       = "thermostat"
+	PartWaterPump        = "water_pump"
+	PartFuelPump         = "fuel_pump"
+	PartClutch           = "clutch"
+	PartShockAbsorbers   = "shock_absorbers"
+	PartStruts           = "struts"
+	PartWiperBlades      = "wiper_blades"
+	PartHeadlights       = "headlights"
+	PartTaillights       = "taillights"
+	PartExhaustSystem    = "exhaust_system"
+	PartCatalyticConverter = "catalytic_converter"
+	PartOxygenSensor     = "oxygen_sensor"
+	PartMassAirflowSensor = "mass_airflow_sensor"
+	PartOther            = "other"
+)
 
 // Default service intervals (in kilometers)
 var DefaultServiceIntervals = map[string]int{
@@ -124,4 +159,48 @@ var DefaultServiceIntervals = map[string]int{
 	MaintenanceTypeSparkPlugs:          30000, // Every 30,000 km
 	MaintenanceTypeBeltReplacement:     100000, // Every 100,000 km
 	MaintenanceTypeInspection:          20000, // Every 20,000 km
+}
+
+// CommonPartsForService maps service types to commonly replaced parts
+var CommonPartsForService = map[string][]string{
+	MaintenanceTypeOilChange: {
+		PartEngineOil,
+		PartOilFilter,
+	},
+	MaintenanceTypeBrakeService: {
+		PartBrakePads,
+		PartBrakeDiscs,
+		PartBrakeFluid,
+	},
+	MaintenanceTypeTransmissionService: {
+		PartTransmissionOil,
+	},
+	MaintenanceTypeEngineTuneUp: {
+		PartSparkPlugs,
+		PartAirFilter,
+		PartFuelFilter,
+	},
+	MaintenanceTypeBatteryReplacement: {
+		PartBattery,
+	},
+	MaintenanceTypeAirFilter: {
+		PartAirFilter,
+	},
+	MaintenanceTypeFuelFilter: {
+		PartFuelFilter,
+	},
+	MaintenanceTypeCoolantFlush: {
+		PartCoolant,
+		PartThermostat,
+	},
+	MaintenanceTypeSparkPlugs: {
+		PartSparkPlugs,
+	},
+	MaintenanceTypeBeltReplacement: {
+		PartTimingBelt,
+		PartSerpentineBelt,
+	},
+	MaintenanceTypeTireRotation: {
+		// Usually no parts replaced, just service
+	},
 }
