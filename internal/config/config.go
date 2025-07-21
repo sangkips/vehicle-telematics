@@ -21,7 +21,7 @@ func Load() *Config {
 	// load .env variable
 	err := godotenv.Load()
 	if err != nil {
-		log.Fatalf("Error loading .env file: %v", err) // Use Fatal to catch this early
+		log.Fatalf("Error loading .env file: %v", err)
 	}
 
 	mongoURI := os.Getenv("MONGO_URI")
@@ -31,22 +31,9 @@ func Load() *Config {
 
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080" // Default port
+		port = "8080"
 	}
 
-	// allowedOrigins := os.Getenv("ALLOWED_ORIGINS")
-	// if allowedOrigins == "" {
-	// 	allowedOrigins = "http://localhost:5173"
-	// }
-
-	// return &Config{
-	// 	Port:            os.Getenv("PORT"),
-	// 	MongoURI:        os.Getenv("MONGO_URI"),
-	// 	JWTSecret:       os.Getenv("JWT_SECRET"),
-	// 	JWTExpiry:       os.Getenv("JWT_EXPIRY"),
-	// 	AllowedOrigins:  os.Getenv("ALLOWED_ORIGINS"),
-	// 	UpdateInterval:  os.Getenv("UPDATE_INTERVAL"),
-	// }
 	allowedOrigins := os.Getenv("ALLOWED_ORIGINS")
     if allowedOrigins == "" {
         allowedOrigins = "http://localhost:5173, https://telematics-pearl.vercel.app"
