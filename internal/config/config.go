@@ -47,10 +47,3 @@ func Load() *Config {
 		UpdateInterval:  os.Getenv("UPDATE_INTERVAL"),
 	}
 }
-
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
