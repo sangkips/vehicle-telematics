@@ -27,7 +27,7 @@ func main() {
 	
 	// CORS middleware
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{cfg.AllowedOrigins},
+		AllowOrigins:     cfg.AllowedOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
