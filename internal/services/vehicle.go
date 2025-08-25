@@ -4,6 +4,10 @@ import (
 	"errors"
 	"fleet-backend/internal/models"
 	"fleet-backend/internal/repository"
+	"fleet-backend/internal/websocket"
+	"fleet-backend/pkg/batch"
+	"fleet-backend/pkg/cache"
+	"fmt"
 	"math"
 	"math/rand/v2"
 	"time"
@@ -11,19 +15,44 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 type VehicleService struct {
-	vehicleRepo *repository.VehicleRepository
-	alertRepo   *repository.AlertRepository
+	vehicleRepo     *repository.VehicleRepository
+	alertRepo       *repository.AlertRepository
+	cacheManager    cache.CacheManager
+	cacheConfig     cache.CacheConfig
+	batchProcessor  batch.BatchProcessor
+	wsManager       websocket.WebSocketManager
 }
 
 func NewVehicleService(vehicleRepo *repository.VehicleRepository) *VehicleService {
 	return &VehicleService{
 		vehicleRepo: vehicleRepo,
+		cacheConfig: cache.DefaultCacheConfig(),
 	}
 }
 
 // SetAlertRepository allows setting the alert repository for alert generation
 func (s *VehicleService) SetAlertRepository(alertRepo *repository.AlertRepository) {
 	s.alertRepo = alertRepo
+}
+
+// SetCacheManager allows setting the cache manager for caching operations
+func (s *VehicleService) SetCacheManager(cacheManager cache.CacheManager) {
+	s.cacheManager = cacheManager
+}
+
+// SetCacheConfig allows setting custom cache configuration
+func (s *VehicleService) SetCacheConfig(config cache.CacheConfig) {
+	s.cacheConfig = config
+}
+
+// SetBatchProcessor allows setting the batch processor for optimized updates
+func (s *VehicleService) SetBatchProcessor(batchProcessor batch.BatchProcessor) {
+	s.batchProcessor = batchProcessor
+}
+
+// SetWebSocketManager allows setting the WebSocket manager for real-time updates
+func (s *VehicleService) SetWebSocketManager(wsManager websocket.WebSocketManager) {
+	s.wsManager = wsManager
 }
 
 type CreateVehicleRequest struct {
@@ -56,11 +85,64 @@ type UpdateVehicleRequest struct {
 }
 
 func (s *VehicleService) GetAllVehicles() ([]*models.Vehicle, error) {
-	return s.vehicleRepo.FindAll()
+	// Try cache first if cache manager is available
+	if s.cacheManager != nil {
+		cacheKey := "all_vehicles"
+		cachedVehicles, err := s.cacheManager.GetVehicleList(cacheKey)
+		if err == nil && cachedVehicles != nil {
+			return cachedVehicles, nil
+		}
+		// Log cache miss but continue to database
+		if err != nil {
+			fmt.Printf("Cache error for GetAllVehicles: %v\n", err)
+		}
+	}
+
+	// Fallback to database
+	vehicles, err := s.vehicleRepo.FindAll()
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache the result if cache manager is available
+	if s.cacheManager != nil {
+		ttl := s.cacheConfig.GetTTLForDataType("vehicle_list")
+		if cacheErr := s.cacheManager.SetVehicleList("all_vehicles", vehicles, ttl); cacheErr != nil {
+			fmt.Printf("Failed to cache all vehicles: %v\n", cacheErr)
+		}
+	}
+
+	return vehicles, nil
 }
 
 func (s *VehicleService) GetVehicleByID(id string) (*models.Vehicle, error) {
-	return s.vehicleRepo.FindByID(id)
+	// Try cache first if cache manager is available
+	if s.cacheManager != nil {
+		cachedVehicle, err := s.cacheManager.GetVehicle(id)
+		if err == nil && cachedVehicle != nil {
+			return cachedVehicle, nil
+		}
+		// Log cache miss but continue to database
+		if err != nil {
+			fmt.Printf("Cache error for GetVehicleByID(%s): %v\n", id, err)
+		}
+	}
+
+	// Fallback to database
+	vehicle, err := s.vehicleRepo.FindByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache the result if cache manager is available
+	if s.cacheManager != nil {
+		ttl := s.cacheConfig.GetTTLForDataType("vehicle")
+		if cacheErr := s.cacheManager.SetVehicle(id, vehicle, ttl); cacheErr != nil {
+			fmt.Printf("Failed to cache vehicle %s: %v\n", id, cacheErr)
+		}
+	}
+
+	return vehicle, nil
 }
 
 func (s *VehicleService) CreateVehicle(req *CreateVehicleRequest) (*models.Vehicle, error) {
@@ -97,7 +179,17 @@ func (s *VehicleService) CreateVehicle(req *CreateVehicleRequest) (*models.Vehic
 		UpdatedAt:       time.Now(),
 	}
 
-	return s.vehicleRepo.Create(vehicle)
+	createdVehicle, err := s.vehicleRepo.Create(vehicle)
+	if err != nil {
+		return nil, err
+	}
+
+	// Invalidate relevant cache entries after successful creation
+	if s.cacheManager != nil {
+		s.invalidateCacheOnCreate(createdVehicle)
+	}
+
+	return createdVehicle, nil
 }
 
 func (s *VehicleService) UpdateVehicle(id string, req *UpdateVehicleRequest) (*models.Vehicle, error) {
@@ -107,8 +199,10 @@ func (s *VehicleService) UpdateVehicle(id string, req *UpdateVehicleRequest) (*m
 		return nil, errors.New("vehicle not found")
 	}
 
-	// Store previous fuel level for theft detection
+	// Store previous values for cache invalidation
 	previousFuelLevel := vehicle.FuelLevel
+	previousDriver := vehicle.Driver
+	previousStatus := vehicle.Status
 
 	// Update fields if provided
 	if req.Name != "" {
@@ -169,42 +263,115 @@ func (s *VehicleService) UpdateVehicle(id string, req *UpdateVehicleRequest) (*m
 		s.checkSpeeding(vehicle)
 	}
 
-	return s.vehicleRepo.Update(id, vehicle)
-}
-
-func (s *VehicleService) DeleteVehicle(id string) error {
-	// Check if vehicle exists
-	_, err := s.vehicleRepo.FindByID(id)
-	if err != nil {
-		return errors.New("vehicle not found")
-	}
-
-	return s.vehicleRepo.Delete(id)
-}
-
-func (s *VehicleService) GetVehicleUpdates() ([]*models.Vehicle, error) {
-	vehicles, err := s.vehicleRepo.FindAll()
+	updatedVehicle, err := s.vehicleRepo.Update(id, vehicle)
 	if err != nil {
 		return nil, err
 	}
 
-	// Simulate real-time updates for demo purposes
-	for _, vehicle := range vehicles {
-		s.simulateVehicleUpdates(vehicle)
+	// Invalidate relevant cache entries after successful update
+	if s.cacheManager != nil {
+		s.invalidateCacheOnUpdate(updatedVehicle, previousDriver, previousStatus)
+	}
+
+	return updatedVehicle, nil
+}
+
+func (s *VehicleService) DeleteVehicle(id string) error {
+	// Check if vehicle exists and get it for cache invalidation
+	vehicle, err := s.vehicleRepo.FindByID(id)
+	if err != nil {
+		return errors.New("vehicle not found")
+	}
+
+	err = s.vehicleRepo.Delete(id)
+	if err != nil {
+		return err
+	}
+
+	// Invalidate relevant cache entries after successful deletion
+	if s.cacheManager != nil {
+		s.invalidateCacheOnDelete(vehicle)
+	}
+
+	return nil
+}
+
+func (s *VehicleService) GetVehicleUpdates() ([]*models.Vehicle, error) {
+	// Simply return all vehicles without simulation
+	// The optimized telemetry service handles updates separately
+	vehicles, err := s.vehicleRepo.FindAll()
+	if err != nil {
+		return nil, err
 	}
 
 	return vehicles, nil
 }
 
 func (s *VehicleService) GetVehiclesByStatus(status string) ([]*models.Vehicle, error) {
-	return s.vehicleRepo.FindByStatus(status)
+	// Try cache first if cache manager is available
+	if s.cacheManager != nil {
+		cacheKey := fmt.Sprintf("vehicles_by_status_%s", status)
+		cachedVehicles, err := s.cacheManager.GetVehicleList(cacheKey)
+		if err == nil && cachedVehicles != nil {
+			return cachedVehicles, nil
+		}
+		// Log cache miss but continue to database
+		if err != nil {
+			fmt.Printf("Cache error for GetVehiclesByStatus(%s): %v\n", status, err)
+		}
+	}
+
+	// Fallback to database
+	vehicles, err := s.vehicleRepo.FindByStatus(status)
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache the result if cache manager is available
+	if s.cacheManager != nil {
+		cacheKey := fmt.Sprintf("vehicles_by_status_%s", status)
+		ttl := s.cacheConfig.GetTTLForDataType("vehicle_list")
+		if cacheErr := s.cacheManager.SetVehicleList(cacheKey, vehicles, ttl); cacheErr != nil {
+			fmt.Printf("Failed to cache vehicles by status %s: %v\n", status, cacheErr)
+		}
+	}
+
+	return vehicles, nil
 }
 
 func (s *VehicleService) GetVehiclesByDriver(driver string) ([]*models.Vehicle, error) {
-	return s.vehicleRepo.FindByDriver(driver)
+	// Try cache first if cache manager is available
+	if s.cacheManager != nil {
+		cacheKey := fmt.Sprintf("vehicles_by_driver_%s", driver)
+		cachedVehicles, err := s.cacheManager.GetVehicleList(cacheKey)
+		if err == nil && cachedVehicles != nil {
+			return cachedVehicles, nil
+		}
+		// Log cache miss but continue to database
+		if err != nil {
+			fmt.Printf("Cache error for GetVehiclesByDriver(%s): %v\n", driver, err)
+		}
+	}
+
+	// Fallback to database
+	vehicles, err := s.vehicleRepo.FindByDriver(driver)
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache the result if cache manager is available
+	if s.cacheManager != nil {
+		cacheKey := fmt.Sprintf("vehicles_by_driver_%s", driver)
+		ttl := s.cacheConfig.GetTTLForDataType("vehicle_list")
+		if cacheErr := s.cacheManager.SetVehicleList(cacheKey, vehicles, ttl); cacheErr != nil {
+			fmt.Printf("Failed to cache vehicles by driver %s: %v\n", driver, cacheErr)
+		}
+	}
+
+	return vehicles, nil
 }
 
-// simulateVehicleUpdates simulates real-time vehicle data changes
+// simulateVehicleUpdates simulates real-time vehicle data changes using batch processing
 func (s *VehicleService) simulateVehicleUpdates(vehicle *models.Vehicle) {
 	now := time.Now()
 	
@@ -214,46 +381,240 @@ func (s *VehicleService) simulateVehicleUpdates(vehicle *models.Vehicle) {
 	}
 
 	previousFuelLevel := vehicle.FuelLevel
+	var updateData batch.VehicleUpdateData
+	hasUpdates := false
 
 	// Simulate fuel consumption or theft
 	random := rand.Float64()
 	if random < 0.02 { // 2% chance of fuel theft
 		fuelDrop := 10 + rand.Float64()*20
-		vehicle.FuelLevel = math.Max(0, vehicle.FuelLevel-fuelDrop)
-		if s.alertRepo != nil {
-			s.checkFuelTheft(vehicle, previousFuelLevel)
+		newFuelLevel := math.Max(0, vehicle.FuelLevel-fuelDrop)
+		updateData.FuelLevel = &newFuelLevel
+		hasUpdates = true
+		
+		// Generate critical alert for fuel theft
+		if s.alertRepo != nil && s.wsManager != nil {
+			s.broadcastFuelTheftAlert(vehicle, previousFuelLevel, newFuelLevel)
 		}
 	} else if random < 0.7 { // 70% chance of normal consumption
 		consumption := rand.Float64() * 0.5
-		vehicle.FuelLevel = math.Max(0, vehicle.FuelLevel-consumption)
+		newFuelLevel := math.Max(0, vehicle.FuelLevel-consumption)
+		updateData.FuelLevel = &newFuelLevel
+		hasUpdates = true
 	}
 
 	// Simulate location changes for active vehicles
 	if vehicle.Status == "active" {
 		variation := 0.01
-		vehicle.Location.Lat += (rand.Float64() - 0.5) * variation
-		vehicle.Location.Lng += (rand.Float64() - 0.5) * variation
+		newLocation := models.Location{
+			Lat:     vehicle.Location.Lat + (rand.Float64()-0.5)*variation,
+			Lng:     vehicle.Location.Lng + (rand.Float64()-0.5)*variation,
+			Address: vehicle.Location.Address, // Keep existing address
+		}
+		updateData.Location = &newLocation
+		hasUpdates = true
 		
 		// Simulate speed changes
-		vehicle.Speed = int(rand.Float64() * 80) // 0-80 km/h
+		newSpeed := int(rand.Float64() * 80) // 0-80 km/h
+		updateData.Speed = &newSpeed
+		
+		// Check for speeding alerts
+		if newSpeed > 80 && s.alertRepo != nil && s.wsManager != nil {
+			s.broadcastSpeedingAlert(vehicle, newSpeed)
+		}
 		
 		// Simulate odometer increase
-		vehicle.Odometer += int(rand.Float64() * 5) // 0-5 km increase
+		newOdometer := vehicle.Odometer + int(rand.Float64()*5) // 0-5 km increase
+		updateData.Odometer = &newOdometer
 	} else {
-		vehicle.Speed = 0
+		// Vehicle is not active, set speed to 0
+		newSpeed := 0
+		updateData.Speed = &newSpeed
+		hasUpdates = true
 	}
 
-	// Check for alerts
-	if s.alertRepo != nil {
-		s.checkLowFuel(vehicle)
-		s.checkSpeeding(vehicle)
+	// Set timestamp for the update
+	updateData.Timestamp = now
+
+	// Send update to batch processor if we have updates and batch processor is available
+	if hasUpdates && s.batchProcessor != nil {
+		if err := s.batchProcessor.AddUpdate(vehicle.ID.Hex(), updateData); err != nil {
+			// Fallback to direct database update if batch processing fails
+			fmt.Printf("Batch processing failed for vehicle %s, falling back to direct update: %v\n", vehicle.ID.Hex(), err)
+			s.fallbackToDirectUpdate(vehicle, updateData)
+		}
+	} else if hasUpdates {
+		// No batch processor available, use direct update
+		s.fallbackToDirectUpdate(vehicle, updateData)
+	}
+}
+
+// fallbackToDirectUpdate performs direct database update when batch processing is unavailable
+func (s *VehicleService) fallbackToDirectUpdate(vehicle *models.Vehicle, updateData batch.VehicleUpdateData) {
+	// Apply updates to vehicle model
+	if updateData.FuelLevel != nil {
+		vehicle.FuelLevel = *updateData.FuelLevel
+	}
+	if updateData.Location != nil {
+		vehicle.Location = *updateData.Location
+	}
+	if updateData.Speed != nil {
+		vehicle.Speed = *updateData.Speed
+	}
+	if updateData.Odometer != nil {
+		vehicle.Odometer = *updateData.Odometer
+	}
+	
+	vehicle.LastUpdate = updateData.Timestamp
+	vehicle.UpdatedAt = updateData.Timestamp
+
+	// Update in database directly
+	if _, err := s.vehicleRepo.Update(vehicle.ID.Hex(), vehicle); err != nil {
+		fmt.Printf("Failed to update vehicle %s directly: %v\n", vehicle.ID.Hex(), err)
+		return
 	}
 
-	vehicle.LastUpdate = now
-	vehicle.UpdatedAt = now
+	// Broadcast update via WebSocket if available
+	if s.wsManager != nil {
+		wsUpdate := s.convertToWebSocketUpdate(vehicle.ID.Hex(), updateData)
+		if err := s.wsManager.BroadcastVehicleUpdate(vehicle.ID.Hex(), wsUpdate); err != nil {
+			fmt.Printf("Failed to broadcast vehicle update via WebSocket: %v\n", err)
+		}
+	}
+}
 
-	// Update in database
-	s.vehicleRepo.Update(vehicle.ID.Hex(), vehicle)
+// convertToWebSocketUpdate converts batch update data to WebSocket update format
+func (s *VehicleService) convertToWebSocketUpdate(vehicleID string, updateData batch.VehicleUpdateData) websocket.VehicleUpdate {
+	data := make(map[string]interface{})
+	updateType := "simulation"
+	priority := websocket.PriorityLow // Default priority for simulation updates
+	
+	// Add fields that were updated
+	if updateData.FuelLevel != nil {
+		data["fuelLevel"] = *updateData.FuelLevel
+		updateType = "fuel"
+		
+		// Check for critical fuel levels
+		if *updateData.FuelLevel < 10 {
+			priority = websocket.PriorityCritical
+		} else if *updateData.FuelLevel < 20 {
+			priority = websocket.PriorityHigh
+		}
+	}
+	
+	if updateData.Location != nil {
+		data["location"] = *updateData.Location
+		if updateType == "simulation" {
+			updateType = "location"
+		}
+	}
+	
+	if updateData.Speed != nil {
+		data["speed"] = *updateData.Speed
+		if updateType == "simulation" {
+			updateType = "speed"
+		}
+		
+		// Check for speeding
+		if *updateData.Speed > 80 {
+			priority = websocket.PriorityHigh
+		}
+	}
+	
+	if updateData.Odometer != nil {
+		data["odometer"] = *updateData.Odometer
+		if updateType == "simulation" {
+			updateType = "odometer"
+		}
+	}
+	
+	return websocket.VehicleUpdate{
+		VehicleID:  vehicleID,
+		UpdateType: updateType,
+		Data:       data,
+		Timestamp:  updateData.Timestamp,
+		Priority:   priority,
+	}
+}
+
+// broadcastFuelTheftAlert broadcasts a critical fuel theft alert
+func (s *VehicleService) broadcastFuelTheftAlert(vehicle *models.Vehicle, previousLevel, newLevel float64) {
+	fuelDrop := previousLevel - newLevel
+	if fuelDrop > 15 { // Threshold for fuel theft detection
+		// Create alert in database
+		alert := &models.Alert{
+			ID:        primitive.NewObjectID(),
+			VehicleID: vehicle.ID.Hex(),
+			Type:      "fuel_theft",
+			Message:   fmt.Sprintf("Abnormal fuel drop detected: %.1fL lost - Possible theft", fuelDrop),
+			Severity:  "critical",
+			Timestamp: time.Now(),
+			Resolved:  false,
+		}
+		
+		if _, err := s.alertRepo.Create(alert); err != nil {
+			fmt.Printf("Failed to create fuel theft alert: %v\n", err)
+		}
+		
+		// Broadcast critical alert via WebSocket
+		wsUpdate := websocket.VehicleUpdate{
+			VehicleID:  vehicle.ID.Hex(),
+			UpdateType: "alert",
+			Data: map[string]interface{}{
+				"alertType":    "fuel_theft",
+				"alertId":      alert.ID.Hex(),
+				"message":      alert.Message,
+				"severity":     alert.Severity,
+				"fuelLevel":    newLevel,
+				"fuelDrop":     fuelDrop,
+				"previousLevel": previousLevel,
+			},
+			Timestamp: alert.Timestamp,
+			Priority:  websocket.PriorityCritical,
+		}
+		
+		if err := s.wsManager.BroadcastVehicleUpdate(vehicle.ID.Hex(), wsUpdate); err != nil {
+			fmt.Printf("Failed to broadcast fuel theft alert: %v\n", err)
+		}
+	}
+}
+
+// broadcastSpeedingAlert broadcasts a high priority speeding alert
+func (s *VehicleService) broadcastSpeedingAlert(vehicle *models.Vehicle, speed int) {
+	// Create alert in database
+	alert := &models.Alert{
+		ID:        primitive.NewObjectID(),
+		VehicleID: vehicle.ID.Hex(),
+		Type:      "speeding",
+		Message:   fmt.Sprintf("Vehicle exceeding speed limit: %d km/h", speed),
+		Severity:  "high",
+		Timestamp: time.Now(),
+		Resolved:  false,
+	}
+	
+	if _, err := s.alertRepo.Create(alert); err != nil {
+		fmt.Printf("Failed to create speeding alert: %v\n", err)
+	}
+	
+	// Broadcast high priority alert via WebSocket
+	wsUpdate := websocket.VehicleUpdate{
+		VehicleID:  vehicle.ID.Hex(),
+		UpdateType: "alert",
+		Data: map[string]interface{}{
+			"alertType": "speeding",
+			"alertId":   alert.ID.Hex(),
+			"message":   alert.Message,
+			"severity":  alert.Severity,
+			"speed":     speed,
+			"speedLimit": 80,
+		},
+		Timestamp: alert.Timestamp,
+		Priority:  websocket.PriorityHigh,
+	}
+	
+	if err := s.wsManager.BroadcastVehicleUpdate(vehicle.ID.Hex(), wsUpdate); err != nil {
+		fmt.Printf("Failed to broadcast speeding alert: %v\n", err)
+	}
 }
 
 // Alert generation methods
@@ -321,5 +682,109 @@ func (s *VehicleService) checkSpeeding(vehicle *models.Vehicle) {
 		
 		// Add alert to vehicle
 		vehicle.Alerts = append(vehicle.Alerts, *alert)
+	}
+}
+
+// Cache invalidation helper methods
+
+// invalidateCacheOnCreate invalidates relevant cache entries when a vehicle is created
+func (s *VehicleService) invalidateCacheOnCreate(vehicle *models.Vehicle) {
+	// Invalidate all vehicles list
+	if err := s.cacheManager.Delete("fleet:vehicle_list:all_vehicles"); err != nil {
+		fmt.Printf("Failed to invalidate all vehicles cache: %v\n", err)
+	}
+
+	// Invalidate vehicles by status list
+	statusCacheKey := fmt.Sprintf("fleet:vehicle_list:vehicles_by_status_%s", vehicle.Status)
+	if err := s.cacheManager.Delete(statusCacheKey); err != nil {
+		fmt.Printf("Failed to invalidate vehicles by status cache: %v\n", err)
+	}
+
+	// Invalidate vehicles by driver list
+	driverCacheKey := fmt.Sprintf("fleet:vehicle_list:vehicles_by_driver_%s", vehicle.Driver)
+	if err := s.cacheManager.Delete(driverCacheKey); err != nil {
+		fmt.Printf("Failed to invalidate vehicles by driver cache: %v\n", err)
+	}
+
+	// Cache the new vehicle
+	ttl := s.cacheConfig.GetTTLForDataType("vehicle")
+	if err := s.cacheManager.SetVehicle(vehicle.ID.Hex(), vehicle, ttl); err != nil {
+		fmt.Printf("Failed to cache new vehicle %s: %v\n", vehicle.ID.Hex(), err)
+	}
+}
+
+// invalidateCacheOnUpdate invalidates relevant cache entries when a vehicle is updated
+func (s *VehicleService) invalidateCacheOnUpdate(vehicle *models.Vehicle, previousDriver, previousStatus string) {
+	vehicleID := vehicle.ID.Hex()
+
+	// Invalidate the specific vehicle cache
+	if err := s.cacheManager.InvalidateVehicle(vehicleID); err != nil {
+		fmt.Printf("Failed to invalidate vehicle cache for %s: %v\n", vehicleID, err)
+	}
+
+	// Invalidate all vehicles list
+	if err := s.cacheManager.Delete("fleet:vehicle_list:all_vehicles"); err != nil {
+		fmt.Printf("Failed to invalidate all vehicles cache: %v\n", err)
+	}
+
+	// Invalidate current status cache
+	statusCacheKey := fmt.Sprintf("fleet:vehicle_list:vehicles_by_status_%s", vehicle.Status)
+	if err := s.cacheManager.Delete(statusCacheKey); err != nil {
+		fmt.Printf("Failed to invalidate vehicles by status cache: %v\n", err)
+	}
+
+	// Invalidate previous status cache if status changed
+	if previousStatus != vehicle.Status {
+		prevStatusCacheKey := fmt.Sprintf("fleet:vehicle_list:vehicles_by_status_%s", previousStatus)
+		if err := s.cacheManager.Delete(prevStatusCacheKey); err != nil {
+			fmt.Printf("Failed to invalidate previous vehicles by status cache: %v\n", err)
+		}
+	}
+
+	// Invalidate current driver cache
+	driverCacheKey := fmt.Sprintf("fleet:vehicle_list:vehicles_by_driver_%s", vehicle.Driver)
+	if err := s.cacheManager.Delete(driverCacheKey); err != nil {
+		fmt.Printf("Failed to invalidate vehicles by driver cache: %v\n", err)
+	}
+
+	// Invalidate previous driver cache if driver changed
+	if previousDriver != vehicle.Driver {
+		prevDriverCacheKey := fmt.Sprintf("fleet:vehicle_list:vehicles_by_driver_%s", previousDriver)
+		if err := s.cacheManager.Delete(prevDriverCacheKey); err != nil {
+			fmt.Printf("Failed to invalidate previous vehicles by driver cache: %v\n", err)
+		}
+	}
+
+	// Cache the updated vehicle
+	ttl := s.cacheConfig.GetTTLForDataType("vehicle")
+	if err := s.cacheManager.SetVehicle(vehicleID, vehicle, ttl); err != nil {
+		fmt.Printf("Failed to cache updated vehicle %s: %v\n", vehicleID, err)
+	}
+}
+
+// invalidateCacheOnDelete invalidates relevant cache entries when a vehicle is deleted
+func (s *VehicleService) invalidateCacheOnDelete(vehicle *models.Vehicle) {
+	vehicleID := vehicle.ID.Hex()
+
+	// Invalidate the specific vehicle cache
+	if err := s.cacheManager.InvalidateVehicle(vehicleID); err != nil {
+		fmt.Printf("Failed to invalidate vehicle cache for %s: %v\n", vehicleID, err)
+	}
+
+	// Invalidate all vehicles list
+	if err := s.cacheManager.Delete("fleet:vehicle_list:all_vehicles"); err != nil {
+		fmt.Printf("Failed to invalidate all vehicles cache: %v\n", err)
+	}
+
+	// Invalidate vehicles by status list
+	statusCacheKey := fmt.Sprintf("fleet:vehicle_list:vehicles_by_status_%s", vehicle.Status)
+	if err := s.cacheManager.Delete(statusCacheKey); err != nil {
+		fmt.Printf("Failed to invalidate vehicles by status cache: %v\n", err)
+	}
+
+	// Invalidate vehicles by driver list
+	driverCacheKey := fmt.Sprintf("fleet:vehicle_list:vehicles_by_driver_%s", vehicle.Driver)
+	if err := s.cacheManager.Delete(driverCacheKey); err != nil {
+		fmt.Printf("Failed to invalidate vehicles by driver cache: %v\n", err)
 	}
 }

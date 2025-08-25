@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fleet-backend/internal/models"
+	"fleet-backend/pkg/cache"
+	"fmt"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -13,13 +15,19 @@ import (
 )
 
 type VehicleRepository struct {
-	collection *mongo.Collection
+	collection   *mongo.Collection
+	cacheManager cache.CacheManager
 }
 
 func NewVehicleRepository(db *mongo.Database) *VehicleRepository {
 	return &VehicleRepository{
 		collection: db.Collection("vehicles"),
 	}
+}
+
+// SetCacheManager allows setting the cache manager for cache invalidation
+func (r *VehicleRepository) SetCacheManager(cacheManager cache.CacheManager) {
+	r.cacheManager = cacheManager
 }
 
 func (r *VehicleRepository) Create(vehicle *models.Vehicle) (*models.Vehicle, error) {
@@ -229,6 +237,11 @@ func (r *VehicleRepository) Update(id string, vehicle *models.Vehicle) (*models.
 		return nil, err
 	}
 
+	// Trigger cache invalidation if cache manager is available
+	if r.cacheManager != nil {
+		r.invalidateVehicleCache(id)
+	}
+
 	return &updatedVehicle, nil
 }
 
@@ -256,6 +269,11 @@ func (r *VehicleRepository) UpdateLocation(id string, location models.Location) 
 
 	if result.MatchedCount == 0 {
 		return errors.New("vehicle not found")
+	}
+
+	// Trigger cache invalidation if cache manager is available
+	if r.cacheManager != nil {
+		r.invalidateVehicleCache(id)
 	}
 
 	return nil
@@ -287,6 +305,11 @@ func (r *VehicleRepository) UpdateFuelLevel(id string, fuelLevel float64) error 
 		return errors.New("vehicle not found")
 	}
 
+	// Trigger cache invalidation if cache manager is available
+	if r.cacheManager != nil {
+		r.invalidateVehicleCache(id)
+	}
+
 	return nil
 }
 
@@ -316,6 +339,11 @@ func (r *VehicleRepository) UpdateStatus(id string, status string) error {
 		return errors.New("vehicle not found")
 	}
 
+	// Trigger cache invalidation if cache manager is available
+	if r.cacheManager != nil {
+		r.invalidateVehicleCache(id)
+	}
+
 	return nil
 }
 
@@ -335,6 +363,11 @@ func (r *VehicleRepository) Delete(id string) error {
 
 	if result.DeletedCount == 0 {
 		return errors.New("vehicle not found")
+	}
+
+	// Trigger cache invalidation if cache manager is available
+	if r.cacheManager != nil {
+		r.invalidateVehicleCache(id)
 	}
 
 	return nil
@@ -423,4 +456,16 @@ func (r *VehicleRepository) CreateIndexes() error {
 
 	_, err := r.collection.Indexes().CreateMany(ctx, indexes)
 	return err
+}
+
+// invalidateVehicleCache invalidates cache entries for a specific vehicle
+func (r *VehicleRepository) invalidateVehicleCache(vehicleID string) {
+	if err := r.cacheManager.InvalidateVehicle(vehicleID); err != nil {
+		fmt.Printf("Failed to invalidate vehicle cache for %s: %v\n", vehicleID, err)
+	}
+	
+	// Also invalidate list caches that might contain this vehicle
+	if err := r.cacheManager.Delete("fleet:vehicle_list:all_vehicles"); err != nil {
+		fmt.Printf("Failed to invalidate all vehicles cache: %v\n", err)
+	}
 }

@@ -1,5 +1,5 @@
 run:
-	cd cmd && cd server && go run main.go
+	cd cmd/server && go run main.go
 
 install:
 	cd backend && pip install -r requirements.txt
@@ -21,3 +21,6 @@ stop:
 
 rm: stop
 	docker compose rm -f
+
+test:
+	go test -v ./internal/websocket ./pkg/batch ./internal/api/handlers

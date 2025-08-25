@@ -31,9 +31,6 @@ func AuthMiddleware() gin.HandlerFunc {
 			tokenString = authHeader
 		}
 
-		// Debug logging
-		// fmt.Printf("Auth Debug - Header: %s\n", authHeader[:min(50, len(authHeader))]+"...")
-		// fmt.Printf("Auth Debug - Token: %s\n", tokenString[:min(50, len(tokenString))]+"...")
 
 		claims, err := jwtUtil.ValidateToken(tokenString)
 		if err != nil {
@@ -42,8 +39,6 @@ func AuthMiddleware() gin.HandlerFunc {
 			c.Abort()
 			return 
 		}
-		
-		// fmt.Printf("Auth Debug - Claims: UserID=%s, Email=%s, Role=%s\n", claims.UserID, claims.Email, claims.Role)
 		
 		c.Set("user_id", claims.UserID)
 		c.Set("email", claims.Email)
