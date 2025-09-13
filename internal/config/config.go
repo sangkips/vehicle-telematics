@@ -35,6 +35,7 @@ type RedisConfig struct {
 	PoolTimeout        time.Duration
 	IdleTimeout        time.Duration
 	IdleCheckFrequency time.Duration
+	URL      			string
 }
 
 type RateLimitConfig struct {
@@ -96,10 +97,11 @@ func loadRedisConfig() RedisConfig {
 		return defaultValue
 	}
 
-	redisHost := os.Getenv("REDIS_HOST")
+	redisHost := os.Getenv("REDIS_URL")
 	if redisHost == "" {
 		redisHost = "localhost"
 	}
+	
 
 	redisPort := os.Getenv("REDIS_PORT")
 	if redisPort == "" {
