@@ -2,6 +2,7 @@ package config
 
 import (
 	"log"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -96,8 +97,9 @@ func loadRedisConfig() RedisConfig {
 		}
 		return defaultValue
 	}
+	redisURL := os.Getenv("REDIS_URL")
 
-	redisHost := os.Getenv("REDIS_URL")
+	redisHost := os.Getenv("REDIS_HOST")
 	if redisHost == "" {
 		redisHost = "localhost"
 	}
@@ -108,11 +110,12 @@ func loadRedisConfig() RedisConfig {
 		redisPort = "6379"
 	}
 
-	return RedisConfig{
-		Host:               redisHost,
-		Port:               redisPort,
-		Password:           os.Getenv("REDIS_PASSWORD"),
-		DB:                 parseInt("REDIS_DB", 0),
+	config := RedisConfig{
+		// Host:               redisHost,
+		// Port:               redisPort,
+		// Password:           os.Getenv("REDIS_PASSWORD"),
+		// DB:                 parseInt("REDIS_DB", 0),
+		URL:                redisURL,
 		PoolSize:           parseInt("REDIS_POOL_SIZE", 10),
 		MinIdleConns:       parseInt("REDIS_MIN_IDLE_CONNS", 5),
 		MaxRetries:         parseInt("REDIS_MAX_RETRIES", 3),
@@ -124,6 +127,52 @@ func loadRedisConfig() RedisConfig {
 		IdleTimeout:        parseDuration("REDIS_IDLE_TIMEOUT", 5*time.Minute),
 		IdleCheckFrequency: parseDuration("REDIS_IDLE_CHECK_FREQUENCY", 1*time.Minute),
 	}
+	// Parse Redis URL if provided (LeapCell format)
+	if redisURL != "" {
+		parsedURL, err := url.Parse(redisURL)
+		if err != nil {
+			log.Printf("Warning: Failed to parse REDIS_URL: %v, using defaults", err)
+			config.Host = "localhost"
+			config.Port = "6379"
+		} else {
+			config.Host = parsedURL.Hostname()
+			if parsedURL.Port() != "" {
+				config.Port = parsedURL.Port()
+			} else {
+				config.Port = "6379"
+			}
+
+			// Extract password from URL
+			if parsedURL.User != nil {
+				config.Password, _ = parsedURL.User.Password()
+			}
+
+			// Extract database number from path
+			if len(parsedURL.Path) > 1 {
+				if dbStr := strings.TrimPrefix(parsedURL.Path, "/"); dbStr != "" {
+					if db, err := strconv.Atoi(dbStr); err == nil {
+						config.DB = db
+					}
+				}
+			}
+		}
+	} else {
+		// Fallback to individual environment variables
+		config.Host = os.Getenv("REDIS_HOST")
+		if config.Host == "" {
+			config.Host = "localhost"
+		}
+
+		config.Port = os.Getenv("REDIS_PORT")
+		if config.Port == "" {
+			config.Port = "6379"
+		}
+
+		config.Password = os.Getenv("REDIS_PASSWORD")
+		config.DB = parseInt("REDIS_DB", 0)
+	}
+
+	return config
 }
 
 func loadRateLimitConfig() RateLimitConfig {

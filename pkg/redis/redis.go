@@ -50,39 +50,75 @@ func NewClient(cfg config.RedisConfig) *Client {
 
 // connect establishes the Redis connection with configured options
 func (c *Client) connect() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	if c.config.URL != "" {
+		opt, err := redis.ParseURL(c.config.URL)
+		if err != nil {
+			log.Printf("Failed to parse Redis URL: %v, falling back to host:port", err)
+			c.connectWithHostPort()
+			return
+		}
 
-	addr := fmt.Sprintf("%s:%s", c.config.Host, c.config.Port)
-	
-	c.client = redis.NewClient(&redis.Options{
-		Addr:            addr,
-		Password:        c.config.Password,
-		DB:              c.config.DB,
-		PoolSize:        c.config.PoolSize,
-		MinIdleConns:    c.config.MinIdleConns,
-		MaxRetries:      c.config.MaxRetries,
-		MinRetryBackoff: c.config.RetryDelay,
-		MaxRetryBackoff: c.config.RetryDelay * 3,
-		DialTimeout:     c.config.DialTimeout,
-		ReadTimeout:     c.config.ReadTimeout,
-		WriteTimeout:    c.config.WriteTimeout,
-		PoolTimeout:     c.config.PoolTimeout,
-		ConnMaxIdleTime: c.config.IdleTimeout,
-	})
+		// Apply additional configuration
+		opt.PoolSize = c.config.PoolSize
+		opt.MinIdleConns = c.config.MinIdleConns
+		opt.MaxRetries = c.config.MaxRetries
+		opt.MinRetryBackoff = c.config.RetryDelay
+		opt.DialTimeout = c.config.DialTimeout
+		opt.ReadTimeout = c.config.ReadTimeout
+		opt.WriteTimeout = c.config.WriteTimeout
+		opt.PoolTimeout = c.config.PoolTimeout
+		// opt.IdleTimeout = c.config.IdleTimeout
+		// opt.IdleCheckFrequency = c.config.IdleCheckFrequency
+
+		c.mu.Lock()
+		c.client = redis.NewClient(opt)
+		c.mu.Unlock()
+	} else {
+		c.connectWithHostPort()
+	}
 
 	// Test the connection
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := c.client.Ping(ctx).Err(); err != nil {
-		log.Printf("Failed to connect to Redis: %v", err)
-		c.isConnected = false
-		c.triggerReconnect()
-	} else {
-		log.Printf("Successfully connected to Redis at %s", addr)
-		c.isConnected = true
+	c.mu.RLock()
+	client := c.client
+	c.mu.RUnlock()
+
+	if client != nil {
+		err := client.Ping(ctx).Err()
+		c.mu.Lock()
+		c.isConnected = (err == nil)
+		c.mu.Unlock()
+
+		if err != nil {
+			log.Printf("Redis connection test failed: %v", err)
+		} else {
+			log.Printf("Redis connected successfully")
+		}
 	}
+}
+
+func (c *Client) connectWithHostPort() {
+	opt := &redis.Options{
+		Addr:               fmt.Sprintf("%s:%s", c.config.Host, c.config.Port),
+		Password:           c.config.Password,
+		DB:                 c.config.DB,
+		PoolSize:           c.config.PoolSize,
+		MinIdleConns:       c.config.MinIdleConns,
+		MaxRetries:         c.config.MaxRetries,
+		MinRetryBackoff:    c.config.RetryDelay,
+		DialTimeout:        c.config.DialTimeout,
+		ReadTimeout:        c.config.ReadTimeout,
+		WriteTimeout:       c.config.WriteTimeout,
+		PoolTimeout:        c.config.PoolTimeout,
+		// IdleTimeout:        c.config.IdleTimeout,
+		// IdleCheckFrequency: c.config.IdleCheckFrequency,
+	}
+
+	c.mu.Lock()
+	c.client = redis.NewClient(opt)
+	c.mu.Unlock()
 }
 
 // GetClient returns the Redis client instance (thread-safe)
