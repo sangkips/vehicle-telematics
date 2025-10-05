@@ -30,27 +30,48 @@ jobs:
         SSH_USER: ${{ secrets.SSH_USER }}
       run: |
         ssh $SSH_USER@$SSH_HOST << 'ENDSSH'
-          # Navigate to backend directory
-          cd /opt/backend || exit
+          set -e
           
-          # Pull latest changes
+          echo "📦 Deploying Backend..."
+          cd /opt/backend
+          
+          echo "📥 Pulling latest changes..."
           git pull origin main
           
-          # Build and restart
+          echo "🔨 Building and starting containers..."
           docker-compose down
-          docker-compose up -d --build
+          docker-compose build --no-cache
+          docker-compose up -d
           
-          # Cleanup
-          docker system prune -af
+          echo "🧹 Cleaning up..."
+          docker system prune -af --volumes
+          
+          echo "✅ Backend deployment complete!"
         ENDSSH
 
-    - name: Verify Backend Deployment
+    - name: Verify Deployment
       env:
         SSH_HOST: ${{ secrets.SSH_HOST }}
         SSH_USER: ${{ secrets.SSH_USER }}
       run: |
         ssh $SSH_USER@$SSH_HOST << 'ENDSSH'
+          echo "🔍 Checking backend status..."
           cd /opt/backend
           docker-compose ps
-          docker-compose logs --tail=50 backend
+          echo ""
+          echo "📋 Recent logs:"
+          docker-compose logs --tail=30 backend
+          
+          echo ""
+          echo "🏥 Health check:"
+          sleep 5
+          curl -f http://localhost:8080/health || echo "⚠️ Health check failed"
         ENDSSH
+
+    - name: Notify on Success
+      if: success()
+      run: echo "✅ Backend deployed successfully!"
+
+    - name: Notify on Failure
+      if: failure()
+      run: echo "❌ Backend deployment failed!"
