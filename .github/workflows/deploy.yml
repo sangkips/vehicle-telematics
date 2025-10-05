@@ -63,7 +63,7 @@ jobs:
           docker-compose logs --tail=30 backend
           
           echo ""
-          echo "🏥 Health check:"
+          echo "🏥 Health check on the process:"
           sleep 5
           curl -f http://localhost:8080/health || echo "⚠️ Health check failed"
         ENDSSH
