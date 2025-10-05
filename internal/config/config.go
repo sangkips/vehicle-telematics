@@ -47,10 +47,9 @@ type RateLimitConfig struct {
 
 func Load() *Config {
 	// load .env variable
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatalf("Error loading .env file: %v", err)
-	}
+	if err := godotenv.Load(); err != nil {
+        log.Println("No .env file found, using environment variables from system")
+    }
 
 	mongoURI := os.Getenv("MONGO_URI")
 	if mongoURI == "" {
