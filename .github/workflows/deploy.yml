@@ -1,0 +1,56 @@
+name: Deploy Backend to OVHcloud
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up SSH
+      uses: webfactory/ssh-agent@v0.8.0
+      with:
+        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+    - name: Add server to known hosts
+      run: |
+        mkdir -p ~/.ssh
+        ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+    - name: Deploy Backend
+      env:
+        SSH_HOST: ${{ secrets.SSH_HOST }}
+        SSH_USER: ${{ secrets.SSH_USER }}
+      run: |
+        ssh $SSH_USER@$SSH_HOST << 'ENDSSH'
+          # Navigate to backend directory
+          cd /opt/backend || exit
+          
+          # Pull latest changes
+          git pull origin main
+          
+          # Build and restart
+          docker-compose down
+          docker-compose up -d --build
+          
+          # Cleanup
+          docker system prune -af
+        ENDSSH
+
+    - name: Verify Backend Deployment
+      env:
+        SSH_HOST: ${{ secrets.SSH_HOST }}
+        SSH_USER: ${{ secrets.SSH_USER }}
+      run: |
+        ssh $SSH_USER@$SSH_HOST << 'ENDSSH'
+          cd /opt/backend
+          docker-compose ps
+          docker-compose logs --tail=50 backend
+        ENDSSH
