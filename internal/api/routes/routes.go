@@ -82,13 +82,13 @@ func SetupRoutes(router *gin.Engine, db *mongo.Database, redisClient *redis.Clie
 		log.Println("Using in-memory rate limiter (Redis is disabled)")
 	}
 	
+	// Health check endpoint (public - before rate limiting)
+	router.GET("/health", healthHandler.HealthCheck)
+
 	// API routes with rate limiting
 	api := router.Group("/api/v1")
 	api.Use(middleware.RateLimitMiddleware(rateLimiter))
-	
-	// Health check endpoint (public)
-	api.GET("/health", healthHandler.HealthCheck)
-	
+
 	// Public routes
 	auth := api.Group("/auth")
 	{
