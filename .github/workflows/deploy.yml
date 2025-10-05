@@ -70,7 +70,7 @@ jobs:
 
     - name: Notify on Success
       if: success()
-      run: echo "✅ Backend deployed successfully!"
+      run: echo "✅ Backend deployed successfully"
 
     - name: Notify on Failure
       if: failure()
