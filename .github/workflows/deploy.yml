@@ -55,7 +55,7 @@ jobs:
         SSH_USER: ${{ secrets.SSH_USER }}
       run: |
         ssh $SSH_USER@$SSH_HOST << 'ENDSSH'
-          echo "🔍 Checking backend status..."
+          echo "🔍 Checking backend statuses..."
           cd /opt/backend/vehicle-telematics
           docker compose ps
           echo ""
