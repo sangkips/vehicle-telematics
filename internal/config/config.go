@@ -18,6 +18,7 @@ type Config struct {
 	JWTExpiry      	string
 	AllowedOrigins 	[]string
 	Redis          	RedisConfig
+	RedisEnabled   	bool
 	RateLimit      	RateLimitConfig
 }
 
@@ -73,6 +74,7 @@ func Load() *Config {
         JWTExpiry:      os.Getenv("JWT_EXPIRY"),
         AllowedOrigins: strings.Split(allowedOrigins, ","),
         Redis:          loadRedisConfig(),
+        RedisEnabled:   loadRedisEnabled(),
         RateLimit:      loadRateLimitConfig(),
     }
 }
@@ -172,6 +174,15 @@ func loadRedisConfig() RedisConfig {
 	}
 
 	return config
+}
+
+func loadRedisEnabled() bool {
+	if val := os.Getenv("REDIS_ENABLED"); val != "" {
+		if boolVal, err := strconv.ParseBool(val); err == nil {
+			return boolVal
+		}
+	}
+	return true // Default to true for local development
 }
 
 func loadRateLimitConfig() RateLimitConfig {

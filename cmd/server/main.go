@@ -23,16 +23,25 @@ func main() {
 	}
 	defer database.Disconnect(db.Client())
 	
-	// Initialize Redis client
-	redisClient := redis.NewClient(cfg.Redis)
-	defer redisClient.Close()
-	
-	// Perform initial health check
-	healthStatus := redisClient.HealthCheck()
-	if healthStatus.IsConnected {
-		log.Printf("Redis connected successfully at %s", healthStatus.ConnectionInfo)
+	var redisClient *redis.Client
+	if cfg.RedisEnabled {
+		// Initialize Redis client
+		redisClient = redis.NewClient(cfg.Redis)
+		defer func() {
+			if redisClient != nil {
+				redisClient.Close()
+			}
+		}()
+
+		// Perform initial health check
+		healthStatus := redisClient.HealthCheck()
+		if healthStatus.IsConnected {
+			log.Printf("Redis connected successfully at %s", healthStatus.ConnectionInfo)
+		} else {
+			log.Printf("Redis connection failed: %s (will retry automatically)", healthStatus.Error)
+		}
 	} else {
-		log.Printf("Redis connection failed: %s (will retry automatically)", healthStatus.Error)
+		log.Println("Redis is disabled")
 	}
 	
 	// Setup Gin router

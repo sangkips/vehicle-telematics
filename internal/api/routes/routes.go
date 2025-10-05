@@ -70,10 +70,17 @@ func SetupRoutes(router *gin.Engine, db *mongo.Database, redisClient *redis.Clie
 		CleanupInterval: cfg.RateLimit.CleanupInterval,
 		Enabled:         cfg.RateLimit.Enabled,
 	}
-	rateLimiter := ratelimit.NewRedisRateLimiter(redisClient.GetClient(), rateLimitConfig)
-	
-	// Load existing custom limits
-	rateLimiter.LoadCustomLimits()
+
+	var rateLimiter ratelimit.RateLimiter
+	if cfg.RedisEnabled && redisClient != nil {
+		redisLimiter := ratelimit.NewRedisRateLimiter(redisClient.GetClient(), rateLimitConfig)
+		// Load existing custom limits
+		redisLimiter.LoadCustomLimits()
+		rateLimiter = redisLimiter
+	} else {
+		rateLimiter = ratelimit.NewMemoryRateLimiter(rateLimitConfig)
+		log.Println("Using in-memory rate limiter (Redis is disabled)")
+	}
 	
 	// API routes with rate limiting
 	api := router.Group("/api/v1")
