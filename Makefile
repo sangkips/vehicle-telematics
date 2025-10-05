@@ -1,15 +1,6 @@
 run:
 	cd cmd/server && go run main.go
 
-install:
-	cd backend && pip install -r requirements.txt
-
-upgrade:
-	cd backend && alembic upgrade head
-
-autogenerate:
-	cd backend && alembic revision --autogenerate -m "migration"
-
 ps:
 	docker compose ps
 
