@@ -33,7 +33,7 @@ jobs:
           set -e
           
           echo "📦 Deploying Backend..."
-          cd /opt/backend
+          cd /opt/backend/vehicle-telematics
           
           echo "📥 Pulling latest changes..."
           git pull origin main
