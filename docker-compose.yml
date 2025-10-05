@@ -9,8 +9,12 @@ services:
       - ENV=production
       - PORT=8080
       - GIN_MODE=release
+      - REDIS_ENABLED=true
+      - REDIS_URL=redis://redis:6379
     env_file:
       - .env
+    depends_on:
+      - redis
     networks:
       - app-network
     healthcheck:
@@ -27,6 +31,26 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  redis_data:
 
 networks:
   app-network:
