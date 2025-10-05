@@ -65,7 +65,7 @@ jobs:
           echo ""
           echo "🏥 Health check on the process:"
           sleep 5
-          curl -f http://localhost:8080/health || echo "⚠️ Health check failed"
+          curl -f http://localhost:8080/api/v1/health || echo "⚠️ Health check failed"
         ENDSSH
 
     - name: Notify on Success
