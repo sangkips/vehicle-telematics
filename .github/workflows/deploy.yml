@@ -1,77 +1,47 @@
-name: Deploy Backend to OVHcloud
+name: Build and Push Go API Docker Image
 
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
-
+  pull_request:
+    branches: [ main ]
 
 jobs:
-  deploy:
+  build-and-push:
     runs-on: ubuntu-latest
-
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
-    - name: Set up SSH
-      uses: webfactory/ssh-agent@v0.8.0
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to DockerHub
+      uses: docker/login-action@v3
       with:
-        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    - name: Add server to known hosts
-      run: |
-        mkdir -p ~/.ssh
-        ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+    - name: Extract metadata for Docker
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ secrets.DOCKERHUB_USERNAME }}/fleet-nextjs-frontend
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
 
-    - name: Deploy Backend
-      env:
-        SSH_HOST: ${{ secrets.SSH_HOST }}
-        SSH_USER: ${{ secrets.SSH_USER }}
-      run: |
-        ssh $SSH_USER@$SSH_HOST << 'ENDSSH'
-          set -e
-          
-          echo "📦 Deploying Backend..."
-          cd /opt/backend/vehicle-telematics
-          
-          echo "📥 Pulling latest changes..."
-          git pull origin main
-          
-          echo "🔨 Building and starting containers..."
-          docker compose down
-          docker compose build --no-cache
-          docker compose up -d
-          
-          echo "🧹 Cleaning up..."
-          docker system prune -af --volumes
-          
-          echo "✅ Backend deployment complete!"
-        ENDSSH
-
-    - name: Verify Deployment
-      env:
-        SSH_HOST: ${{ secrets.SSH_HOST }}
-        SSH_USER: ${{ secrets.SSH_USER }}
-      run: |
-        ssh $SSH_USER@$SSH_HOST << 'ENDSSH'
-          echo "🔍 Checking backend statuses..."
-          cd /opt/backend/vehicle-telematics
-          docker compose ps
-          echo ""
-          echo "📋 Recent logs:"
-          docker compose logs --tail=30 backend
-          
-          echo ""
-          echo "🏥 Health check on the process:"
-          sleep 5
-          curl -f http://localhost:8080/health || echo "⚠️ Health check failed"
-        ENDSSH
-
-    - name: Notify on Success
-      if: success()
-      run: echo "✅ Backend deployed successfully"
-
-    - name: Notify on Failure
-      if: failure()
-      run: echo "❌ Backend deployment failed!"
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max

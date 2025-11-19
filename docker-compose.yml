@@ -11,6 +11,7 @@ services:
       - GIN_MODE=release
       - REDIS_ENABLED=true
       - REDIS_URL=redis://redis:6379
+      - ALLOWED_ORIGINS=https://telematics.autoscaleops.com
     env_file:
       - .env
     depends_on:
