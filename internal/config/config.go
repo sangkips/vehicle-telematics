@@ -64,7 +64,7 @@ func Load() *Config {
 
 	allowedOrigins := os.Getenv("ALLOWED_ORIGINS")
     if allowedOrigins == "" {
-        allowedOrigins = "http://localhost:5173, https://telematics-pearl.vercel.apP"
+        allowedOrigins = "*"
     }
 
     return &Config{
