@@ -12,7 +12,6 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-
 type UserRepository struct {
 	collection *mongo.Collection
 }
@@ -231,6 +230,110 @@ func (r *UserRepository) CountByStatus(status string) (int64, error) {
 
 	count, err := r.collection.CountDocuments(ctx, bson.M{"status": status})
 	return count, err
+}
+
+// UpdatePasswordResetToken updates the password reset token and expiry for a user
+func (r *UserRepository) UpdatePasswordResetToken(email, token string, expiry time.Time) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	update := bson.M{
+		"$set": bson.M{
+			"password_reset_token":  token,
+			"password_reset_expiry": expiry,
+			"updated_at":            time.Now(),
+		},
+	}
+
+	result, err := r.collection.UpdateOne(ctx, bson.M{"email": email}, update)
+	if err != nil {
+		return err
+	}
+
+	if result.MatchedCount == 0 {
+		return errors.New("user not found")
+	}
+
+	return nil
+}
+
+// FindByResetToken finds a user by their password reset token
+func (r *UserRepository) FindByResetToken(token string) (*models.User, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var user models.User
+	err := r.collection.FindOne(ctx, bson.M{
+		"password_reset_token":  token,
+		"password_reset_expiry": bson.M{"$gt": time.Now()}, // Token must not be expired
+	}).Decode(&user)
+
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, errors.New("invalid or expired reset token")
+		}
+		return nil, err
+	}
+
+	return &user, nil
+}
+
+// ClearPasswordResetToken clears the password reset token fields for a user
+func (r *UserRepository) ClearPasswordResetToken(userID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	objectID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return errors.New("invalid user ID")
+	}
+
+	update := bson.M{
+		"$unset": bson.M{
+			"password_reset_token":  "",
+			"password_reset_expiry": "",
+		},
+		"$set": bson.M{
+			"updated_at": time.Now(),
+		},
+	}
+
+	result, err := r.collection.UpdateOne(ctx, bson.M{"_id": objectID}, update)
+	if err != nil {
+		return err
+	}
+
+	if result.MatchedCount == 0 {
+		return errors.New("user not found")
+	}
+
+	return nil
+}
+
+// CleanupExpiredResetTokens removes expired password reset tokens from all users
+func (r *UserRepository) CleanupExpiredResetTokens() (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	update := bson.M{
+		"$unset": bson.M{
+			"password_reset_token":  "",
+			"password_reset_expiry": "",
+		},
+		"$set": bson.M{
+			"updated_at": time.Now(),
+		},
+	}
+
+	result, err := r.collection.UpdateMany(ctx, bson.M{
+		"password_reset_expiry": bson.M{"$lte": time.Now()},
+	}, update)
+
+	if err != nil {
+		return 0, err
+	}
+
+	return result.ModifiedCount, nil
 }
 
 // CreateIndexes creates necessary indexes for the users collection

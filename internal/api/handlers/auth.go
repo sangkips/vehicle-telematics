@@ -45,7 +45,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 // Logout handles user logout
 func (h *AuthHandler) Logout(c *gin.Context) {
-	
+
 	utils.SuccessResponse(c, http.StatusOK, "Logout successful", nil)
 }
 
@@ -143,4 +143,47 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	}
 
 	utils.SuccessResponse(c, http.StatusOK, "Password changed successfully", nil)
+}
+
+// ForgotPassword handles password reset requests
+func (h *AuthHandler) ForgotPassword(c *gin.Context) {
+	var req services.ForgotPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.ErrorResponse(c, http.StatusBadRequest, "Invalid request format", err)
+		return
+	}
+
+	if err := h.validator.Struct(&req); err != nil {
+		utils.ValidationErrorResponse(c, err)
+		return
+	}
+
+	if err := h.authService.ForgotPassword(req.Email); err != nil {
+		// Don't reveal specific errors to prevent information disclosure
+		utils.SuccessResponse(c, http.StatusOK, "If the email exists, a password reset link has been sent", nil)
+		return
+	}
+
+	utils.SuccessResponse(c, http.StatusOK, "If the email exists, a password reset link has been sent", nil)
+}
+
+// ResetPassword handles password reset completion
+func (h *AuthHandler) ResetPassword(c *gin.Context) {
+	var req services.ResetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.ErrorResponse(c, http.StatusBadRequest, "Invalid request format", err)
+		return
+	}
+
+	if err := h.validator.Struct(&req); err != nil {
+		utils.ValidationErrorResponse(c, err)
+		return
+	}
+
+	if err := h.authService.ResetPassword(req.Token, req.NewPassword); err != nil {
+		utils.ErrorResponse(c, http.StatusBadRequest, "Failed to reset password", err)
+		return
+	}
+
+	utils.SuccessResponse(c, http.StatusOK, "Password reset successfully", nil)
 }

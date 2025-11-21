@@ -8,15 +8,17 @@ import (
 	"fleet-backend/internal/services"
 	"fleet-backend/internal/websocket"
 	"fleet-backend/pkg/batch"
+	"fleet-backend/pkg/cleanup"
+	"fleet-backend/pkg/email"
 	"fleet-backend/pkg/ratelimit"
 	"fleet-backend/pkg/redis"
 	"fleet-backend/pkg/telemetry"
 	"log"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/mongo"
 )
-
 
 func SetupRoutes(router *gin.Engine, db *mongo.Database, redisClient *redis.Client, cfg *config.Config) {
 	// Initialize repositories
@@ -24,33 +26,46 @@ func SetupRoutes(router *gin.Engine, db *mongo.Database, redisClient *redis.Clie
 	vehicleRepo := repository.NewVehicleRepository(db)
 	alertRepo := repository.NewAlertRepository(db)
 	maintenanceRepo := repository.NewMaintenanceRepository(db)
-	
+
 	// Initialize services
-	authService := services.NewAuthService(userRepo)
+	emailService := email.NewEmailService(
+		cfg.SMTP.Host,
+		cfg.SMTP.Port,
+		cfg.SMTP.Username,
+		cfg.SMTP.Password,
+		cfg.SMTP.FromEmail,
+		cfg.SMTP.FromName,
+		cfg.AppURL,
+	)
+	authService := services.NewAuthService(userRepo, emailService)
 	userService := services.NewUserService(userRepo)
 	vehicleService := services.NewVehicleService(vehicleRepo)
 	alertService := services.NewAlertService(alertRepo)
 	maintenanceService := services.NewMaintenanceService(maintenanceRepo, vehicleRepo)
-	
+
 	// Initialize WebSocket manager
 	wsManager := websocket.NewManager()
 	wsManager.Start()
-	
+
 	// Initialize batch processor
 	batchConfig := batch.LoadBatchConfigFromEnv()
 	batchRepo := batch.NewVehicleRepositoryAdapter(vehicleRepo, db)
 	batchProcessor := batch.NewBatchProcessorWithWebSocket(batchConfig, batchRepo, wsManager)
-	
+
 	// Initialize optimized telemetry service
 	telemetryService := telemetry.NewOptimizedTelemetryService(vehicleService, batchProcessor)
-	
+
 	// Start telemetry service
 	if err := telemetryService.Start(); err != nil {
 		log.Printf("Warning: Failed to start telemetry service: %v", err)
 	} else {
 		log.Println("Optimized telemetry service started successfully")
 	}
-	
+
+	// Initialize and start cleanup service
+	cleanupService := cleanup.NewCleanupService(userRepo, 1*time.Hour)
+	go cleanupService.Start()
+
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(authService)
 	userHandler := handlers.NewUserHandler(userService)
@@ -59,10 +74,10 @@ func SetupRoutes(router *gin.Engine, db *mongo.Database, redisClient *redis.Clie
 	maintenanceHandler := handlers.NewMaintenanceHandler(maintenanceService)
 	healthHandler := handlers.NewHealthHandler(db, redisClient)
 	wsHandler := handlers.NewWebSocketHandler(wsManager)
-	
+
 	// Initialize vehicle WebSocket handler (for testing)
 	// vehicleWSHandler := handlers.NewVehicleWebSocketHandler(wsManager, nil)
-	
+
 	// Initialize rate limiter
 	rateLimitConfig := &ratelimit.Config{
 		DefaultLimits:   ratelimit.DefaultConfig().DefaultLimits,
@@ -81,7 +96,7 @@ func SetupRoutes(router *gin.Engine, db *mongo.Database, redisClient *redis.Clie
 		rateLimiter = ratelimit.NewMemoryRateLimiter(rateLimitConfig)
 		log.Println("Using in-memory rate limiter (Redis is disabled)")
 	}
-	
+
 	// Health check endpoint (public - before rate limiting)
 	router.GET("/health", healthHandler.HealthCheck)
 
@@ -96,10 +111,10 @@ func SetupRoutes(router *gin.Engine, db *mongo.Database, redisClient *redis.Clie
 		auth.POST("/logout", authHandler.Logout)
 		auth.POST("/refresh", authHandler.RefreshTokenPublic)
 		auth.POST("/register", userHandler.CreateUser)
+		auth.POST("/forgot-password", authHandler.ForgotPassword)
+		auth.POST("/reset-password", authHandler.ResetPassword)
 	}
-	
 
-	
 	// Protected auth routes
 	authProtected := api.Group("/auth")
 	authProtected.Use(middleware.AuthMiddleware())
@@ -108,7 +123,7 @@ func SetupRoutes(router *gin.Engine, db *mongo.Database, redisClient *redis.Clie
 		authProtected.POST("/change-password", authHandler.ChangePassword)
 		authProtected.POST("/refresh-secure", authHandler.RefreshToken)
 	}
-	
+
 	// Protected routes
 	protected := api.Group("/")
 	protected.Use(middleware.AuthMiddleware())
@@ -123,7 +138,7 @@ func SetupRoutes(router *gin.Engine, db *mongo.Database, redisClient *redis.Clie
 			vehicles.DELETE("/:id", vehicleHandler.DeleteVehicle)
 			vehicles.GET("/updates", vehicleHandler.GetVehicleUpdates)
 		}
-		
+
 		// Users
 		users := protected.Group("/users")
 		{
@@ -133,7 +148,7 @@ func SetupRoutes(router *gin.Engine, db *mongo.Database, redisClient *redis.Clie
 			users.PATCH("/:id", userHandler.UpdateUser)
 			users.DELETE("/:id", userHandler.DeleteUser)
 		}
-		
+
 		// Alerts
 		alerts := protected.Group("/alerts")
 		{
@@ -151,7 +166,7 @@ func SetupRoutes(router *gin.Engine, db *mongo.Database, redisClient *redis.Clie
 			alerts.PATCH("/vehicle/:vehicleId/resolve", alertHandler.ResolveAlertsByVehicle)
 			alerts.PATCH("/type/resolve", alertHandler.ResolveAlertsByType)
 		}
-		
+
 		// Maintenance
 		maintenance := protected.Group("/maintenance")
 		{
@@ -161,7 +176,7 @@ func SetupRoutes(router *gin.Engine, db *mongo.Database, redisClient *redis.Clie
 			maintenance.GET("/records/:id", maintenanceHandler.GetMaintenanceRecord)
 			maintenance.PATCH("/records/:id", maintenanceHandler.UpdateMaintenanceRecord)
 			maintenance.DELETE("/records/:id", maintenanceHandler.DeleteMaintenanceRecord)
-			
+
 			// Maintenance Schedules
 			maintenance.POST("/schedules", maintenanceHandler.CreateSchedule)
 			maintenance.GET("/schedules", maintenanceHandler.GetAllSchedules)
@@ -170,13 +185,13 @@ func SetupRoutes(router *gin.Engine, db *mongo.Database, redisClient *redis.Clie
 			maintenance.GET("/schedules/:id", maintenanceHandler.GetSchedule)
 			maintenance.PATCH("/schedules/:id", maintenanceHandler.UpdateSchedule)
 			maintenance.DELETE("/schedules/:id", maintenanceHandler.DeleteSchedule)
-			
+
 			// Service Reminders
 			maintenance.GET("/reminders/vehicle/:vehicleId", maintenanceHandler.GetServiceReminders)
 			maintenance.GET("/reminders/overdue", maintenanceHandler.GetOverdueReminders)
 			maintenance.GET("/reminders/due", maintenanceHandler.GetNextServiceDue)
 		}
-		
+
 		// WebSocket routes (protected)
 		ws := protected.Group("/ws")
 		{

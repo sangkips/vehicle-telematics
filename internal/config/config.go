@@ -12,14 +12,16 @@ import (
 )
 
 type Config struct {
-	Port 			string
-	MongoURI 		string
-	JWTSecret      	string
-	JWTExpiry      	string
-	AllowedOrigins 	[]string
-	Redis          	RedisConfig
-	RedisEnabled   	bool
-	RateLimit      	RateLimitConfig
+	Port           string
+	MongoURI       string
+	JWTSecret      string
+	JWTExpiry      string
+	AllowedOrigins []string
+	Redis          RedisConfig
+	RedisEnabled   bool
+	RateLimit      RateLimitConfig
+	SMTP           SMTPConfig
+	AppURL         string
 }
 
 type RedisConfig struct {
@@ -37,7 +39,7 @@ type RedisConfig struct {
 	PoolTimeout        time.Duration
 	IdleTimeout        time.Duration
 	IdleCheckFrequency time.Duration
-	URL      			string
+	URL                string
 }
 
 type RateLimitConfig struct {
@@ -46,11 +48,20 @@ type RateLimitConfig struct {
 	CleanupInterval time.Duration `json:"cleanupInterval"`
 }
 
+type SMTPConfig struct {
+	Host      string
+	Port      string
+	Username  string
+	Password  string
+	FromEmail string
+	FromName  string
+}
+
 func Load() *Config {
 	// load .env variable
 	if err := godotenv.Load(); err != nil {
-        log.Println("No .env file found, using environment variables from system")
-    }
+		log.Println("No .env file found, using environment variables from system")
+	}
 
 	mongoURI := os.Getenv("MONGO_URI")
 	if mongoURI == "" {
@@ -63,20 +74,22 @@ func Load() *Config {
 	}
 
 	allowedOrigins := os.Getenv("ALLOWED_ORIGINS")
-    if allowedOrigins == "" {
-        allowedOrigins = "*"
-    }
+	if allowedOrigins == "" {
+		allowedOrigins = "*"
+	}
 
-    return &Config{
-        Port:           port,
-        MongoURI:       mongoURI,
-        JWTSecret:      os.Getenv("JWT_SECRET"),
-        JWTExpiry:      os.Getenv("JWT_EXPIRY"),
-        AllowedOrigins: strings.Split(allowedOrigins, ","),
-        Redis:          loadRedisConfig(),
-        RedisEnabled:   loadRedisEnabled(),
-        RateLimit:      loadRateLimitConfig(),
-    }
+	return &Config{
+		Port:           port,
+		MongoURI:       mongoURI,
+		JWTSecret:      os.Getenv("JWT_SECRET"),
+		JWTExpiry:      os.Getenv("JWT_EXPIRY"),
+		AllowedOrigins: strings.Split(allowedOrigins, ","),
+		Redis:          loadRedisConfig(),
+		RedisEnabled:   loadRedisEnabled(),
+		RateLimit:      loadRateLimitConfig(),
+		SMTP:           loadSMTPConfig(),
+		AppURL:         getEnvOrDefault("APP_URL", "http://localhost:3000"),
+	}
 }
 func loadRedisConfig() RedisConfig {
 	// Helper function to parse duration with default
@@ -104,7 +117,6 @@ func loadRedisConfig() RedisConfig {
 	if redisHost == "" {
 		redisHost = "localhost"
 	}
-	
 
 	redisPort := os.Getenv("REDIS_PORT")
 	if redisPort == "" {
@@ -216,4 +228,22 @@ func loadRateLimitConfig() RateLimitConfig {
 		RedisKeyPrefix:  keyPrefix,
 		CleanupInterval: parseDuration("RATE_LIMIT_CLEANUP_INTERVAL", 5*time.Minute),
 	}
+}
+
+func loadSMTPConfig() SMTPConfig {
+	return SMTPConfig{
+		Host:      getEnvOrDefault("SMTP_HOST", "smtp.gmail.com"),
+		Port:      getEnvOrDefault("SMTP_PORT", "587"),
+		Username:  os.Getenv("SMTP_USERNAME"),
+		Password:  os.Getenv("SMTP_PASSWORD"),
+		FromEmail: getEnvOrDefault("SMTP_FROM_EMAIL", os.Getenv("SMTP_USERNAME")),
+		FromName:  getEnvOrDefault("SMTP_FROM_NAME", "Autoscaleops"),
+	}
+}
+
+func getEnvOrDefault(key, defaultValue string) string {
+	if val := os.Getenv(key); val != "" {
+		return val
+	}
+	return defaultValue
 }
