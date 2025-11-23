@@ -237,7 +237,7 @@ func loadSMTPConfig() SMTPConfig {
 		Username:  os.Getenv("SMTP_USERNAME"),
 		Password:  os.Getenv("SMTP_PASSWORD"),
 		FromEmail: getEnvOrDefault("SMTP_FROM_EMAIL", os.Getenv("SMTP_USERNAME")),
-		FromName:  getEnvOrDefault("SMTP_FROM_NAME", "Autoscaleops"),
+		FromName:  getEnvOrDefault("SMTP_FROM_NAME", "Nura"),
 	}
 }
 
