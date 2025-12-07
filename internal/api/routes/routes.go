@@ -10,6 +10,7 @@ import (
 	"fleet-backend/pkg/batch"
 	"fleet-backend/pkg/cleanup"
 	"fleet-backend/pkg/email"
+	"fleet-backend/pkg/metrics"
 	"fleet-backend/pkg/ratelimit"
 	"fleet-backend/pkg/redis"
 	"fleet-backend/pkg/telemetry"
@@ -73,6 +74,7 @@ func SetupRoutes(router *gin.Engine, db *mongo.Database, redisClient *redis.Clie
 	alertHandler := handlers.NewAlertHandler(alertService)
 	maintenanceHandler := handlers.NewMaintenanceHandler(maintenanceService)
 	healthHandler := handlers.NewHealthHandler(db, redisClient)
+	metricsHandler := handlers.NewMetricsHandler()
 	wsHandler := handlers.NewWebSocketHandler(wsManager)
 
 	// Initialize vehicle WebSocket handler (for testing)
@@ -97,8 +99,12 @@ func SetupRoutes(router *gin.Engine, db *mongo.Database, redisClient *redis.Clie
 		log.Println("Using in-memory rate limiter (Redis is disabled)")
 	}
 
-	// Health check endpoint (public - before rate limiting)
+	// Add Prometheus metrics middleware
+	router.Use(metrics.PrometheusMiddleware())
+
+	// Public endpoints (before rate limiting)
 	router.GET("/health", healthHandler.HealthCheck)
+	router.GET("/metrics", metricsHandler.Handler())
 
 	// API routes with rate limiting
 	api := router.Group("/api/v1")

@@ -14,4 +14,4 @@ rm: stop
 	docker compose rm -f
 
 test:
-	go test -v ./internal/websocket ./pkg/batch ./internal/api/handlers
+	go test -v ./internal/websocket ./pkg/batch ./internal/api/handlers ./pkg/metrics
